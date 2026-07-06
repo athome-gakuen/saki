@@ -16,7 +16,9 @@ TOKEN = os.getenv("DISCORD_TOKEN")
 if TOKEN is None:
     raise RuntimeError("DISCORD_TOKEN が .env に設定されていません")
 
-CHANNEL_ID = int(os.getenv("STARTUP_CHANNEL_ID"))
+STARTUP_CHANNEL_ID = int(os.getenv("STARTUP_CHANNEL_ID"))
+BASE_CHANNEL_ID = int(os.getenv("BASE_CHANNEL_ID"))
+
 JST = ZoneInfo("Asia/Tokyo")
 DATA_FILE = Path(__file__).with_name("run_records.json")
 RUN_BUTTON_TIMEOUT_SECONDS = 10 * 60
@@ -90,7 +92,7 @@ class RunButtonView(discord.ui.View):
 async def on_ready():
     print(f"ログインしました: {bot.user}")
 
-    channel = bot.get_channel(CHANNEL_ID)
+    channel = bot.get_channel(STARTUP_CHANNEL_ID)
     if channel is not None:
         startup_time = datetime.now(JST).strftime("%Y-%m-%d %H:%M:%S")
         await channel.send(f"未来のトップアイドル、花海咲季よ！\n起動時間: {startup_time} JST")
@@ -105,10 +107,10 @@ async def on_ready():
 
 @tasks.loop(time=time(hour=4, minute=0, tzinfo=JST))
 async def send_morning_message():
-    channel = bot.get_channel(CHANNEL_ID)
+    channel = bot.get_channel(BASE_CHANNEL_ID)
 
     if channel is None:
-        print("チャンネルが見つかりませんでした")
+        print("朝4時メッセージ用のチャンネルが見つかりませんでした")
         return
 
     view = RunButtonView()
@@ -138,9 +140,9 @@ async def send_weekly_report():
         if run_year == iso_year and run_week == iso_week:
             weekly_counts.update(user_ids)
 
-    channel = bot.get_channel(CHANNEL_ID)
+    channel = bot.get_channel(BASE_CHANNEL_ID)
     if channel is None:
-        print("チャンネルが見つかりませんでした")
+        print("週間レポート用のチャンネルが見つかりませんでした")
         return
 
     if not weekly_counts:
