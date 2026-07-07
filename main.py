@@ -21,7 +21,8 @@ BASE_CHANNEL_ID = int(os.getenv("BASE_CHANNEL_ID"))
 
 JST = ZoneInfo("Asia/Tokyo")
 DATA_FILE = Path(__file__).with_name("run_records.json")
-RUN_BUTTON_TIMEOUT_SECONDS = 10 * 60
+RUN_BUTTON_TIMEOUT_SECONDS = 30 * 60
+DAILY_RANKING_TIME = time(hour=8, minute=0, tzinfo=JST)
 WEEKLY_REPORT_TIME = time(hour=20, minute=0, tzinfo=JST)
 
 intents = discord.Intents.default()
@@ -50,6 +51,37 @@ def today_key():
     return datetime.now(JST).date().isoformat()
 
 
+def daily_run_user_id(record):
+    if isinstance(record, dict):
+        return record.get("user_id")
+    return record
+
+
+def daily_run_pressed_at(record):
+    if not isinstance(record, dict):
+        return None
+
+    pressed_at = record.get("pressed_at")
+    if pressed_at is None:
+        return None
+
+    try:
+        parsed_at = datetime.fromisoformat(pressed_at)
+    except ValueError:
+        return None
+
+    if parsed_at.tzinfo is None:
+        return parsed_at.replace(tzinfo=JST)
+    return parsed_at
+
+
+def daily_run_pressed_time_text(record):
+    pressed_at = daily_run_pressed_at(record)
+    if pressed_at is None:
+        return "時刻不明"
+    return pressed_at.astimezone(JST).strftime("%H:%M:%S")
+
+
 class RunButtonView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=RUN_BUTTON_TIMEOUT_SECONDS)
@@ -61,15 +93,21 @@ class RunButtonView(discord.ui.View):
         date_key = today_key()
         user_id = str(interaction.user.id)
         today_runners = data["daily_runs"].setdefault(date_key, [])
+        recorded_user_ids = {daily_run_user_id(record) for record in today_runners}
 
-        if user_id in today_runners:
+        if user_id in recorded_user_ids:
             await interaction.response.send_message(
                 "もう記録済みよ。継続する姿勢は悪くないわね！",
                 ephemeral=True,
             )
             return
 
-        today_runners.append(user_id)
+        today_runners.append(
+            {
+                "user_id": user_id,
+                "pressed_at": datetime.now(JST).isoformat(),
+            }
+        )
         save_run_records(data)
 
         await interaction.response.send_message(
@@ -122,6 +160,9 @@ async def on_ready():
     if not send_weekly_report.is_running():
         send_weekly_report.start()
 
+    if not send_daily_ranking.is_running():
+        send_daily_ranking.start()
+
 
 @tasks.loop(time=time(hour=4, minute=0, tzinfo=JST))
 async def send_morning_message():
@@ -133,8 +174,46 @@ async def send_morning_message():
 
     view = RunButtonView()
     view.message = await channel.send(
-        "朝4時よ！　これから走りに出るんでしょ？\n10分以内に「走る」を押した人を記録するわ！",
+        "朝4時よ！　これから走りに出るんでしょ？\n30分以内に「走る」を押した人を記録するわ！",
         view=view,
+    )
+
+
+@tasks.loop(time=DAILY_RANKING_TIME)
+async def send_daily_ranking():
+    date_key = today_key()
+    data = load_run_records()
+    today_runners = data["daily_runs"].get(date_key, [])
+
+    channel = bot.get_channel(BASE_CHANNEL_ID)
+    if channel is None:
+        print("朝8時ランキング用のチャンネルが見つかりませんでした")
+        return
+
+    ranking_records = [
+        record
+        for record in today_runners
+        if daily_run_user_id(record) is not None
+    ]
+
+    if not ranking_records:
+        await channel.send(
+            "今朝はまだ誰も押せてないみたいね。そういう日もあるわ。明日は切り替えていくわよ！"
+        )
+        return
+
+    ranking_records.sort(
+        key=lambda record: daily_run_pressed_at(record) or datetime.max.replace(tzinfo=JST)
+    )
+
+    ranking_lines = [
+        f"{index}位：<@{daily_run_user_id(record)}>（{daily_run_pressed_time_text(record)}）"
+        for index, record in enumerate(ranking_records, start=1)
+    ]
+    await channel.send(
+        "今朝の「走る」ランキングよ！\n"
+        + "\n".join(ranking_lines)
+        + "\n速く動けたの、悪くないわね！"
     )
 
 
@@ -156,7 +235,11 @@ async def send_weekly_report():
         run_date = datetime.fromisoformat(date_text).date()
         run_year, run_week, _ = run_date.isocalendar()
         if run_year == iso_year and run_week == iso_week:
-            weekly_counts.update(user_ids)
+            weekly_counts.update(
+                user_id
+                for user_id in (daily_run_user_id(record) for record in user_ids)
+                if user_id is not None
+            )
 
     channel = bot.get_channel(BASE_CHANNEL_ID)
     if channel is None:
