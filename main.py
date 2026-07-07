@@ -1,5 +1,6 @@
 import os
 import json
+import pytz
 from collections import Counter
 from datetime import datetime, time
 from pathlib import Path
@@ -90,19 +91,25 @@ class RunButtonView(discord.ui.View):
 
 @bot.event
 async def on_ready():
-    print(f"ログインしました: {bot.user}")
+    jst = pytz.timezone("Asia/Tokyo")
+    current_time = datetime.now(jst).strftime("%Y-%m-%d %H:%M:%S")
 
-    channel = bot.get_channel(STARTUP_CHANNEL_ID)
-    if channel is not None:
-        startup_time = datetime.now(JST).strftime("%Y-%m-%d %H:%M:%S")
-        await channel.send(f"未来のトップアイドル、花海咲季よ！\n起動時間: {startup_time} JST")
-    else:
-        print("起動通知用のチャンネルが見つかりませんでした")
+    print(f"{bot.user.name}が起動しました。")
+    print(f"起動時間：{current_time}")
 
-    if not send_morning_message.is_running():
-        send_morning_message.start()
-    if not send_weekly_report.is_running():
-        send_weekly_report.start()
+    try:
+        synced = await bot.tree.sync()
+        print(f"スラッシュコマンド {len(synced)} 個を同期しました")
+    except Exception as e:
+        print(f"同期エラー: {e}")
+
+    embed = discord.Embed(
+        title = "Seirios_bot",
+        description = f"未来のトップアイドル、花海咲季よ！\nbot起動時間：{current_time}",
+        color = discord.Color.pink()
+    )
+    
+    await STARTUP_CHANNEL_ID.send (embed=embed)
 
 
 @tasks.loop(time=time(hour=4, minute=0, tzinfo=JST))
