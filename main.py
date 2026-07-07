@@ -102,14 +102,17 @@ async def on_ready():
         print(f"同期エラー: {e}")
 
     embed = discord.Embed(
-        title="saki",
-        description=f"未来のトップアイドル、花海咲季よ！\nbot起動時間：{current_time}",
-        color=discord.Color.pink(),
-    )
+    title="saki",
+    description=f"bot起動時間：{current_time}",
+    color=discord.Color.red(),
+)
 
     channel = bot.get_channel(STARTUP_CHANNEL_ID)
     if channel is not None:
-        await channel.send(embed=embed)
+        await channel.send(
+            content="未来のトップアイドル、花海咲季よ！",
+            embed=embed,
+        )
     else:
         print("起動通知用のチャンネルが見つかりませんでした")
 
