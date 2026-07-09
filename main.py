@@ -105,6 +105,8 @@ class RunButtonView(discord.ui.View):
         today_runners.append(
             {
                 "user_id": user_id,
+                "user_name": interaction.user.name,
+                "display_name": interaction.user.display_name,
                 "pressed_at": datetime.now(JST).isoformat(),
             }
         )
