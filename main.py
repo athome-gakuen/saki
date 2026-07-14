@@ -1,3 +1,4 @@
+import asyncio
 import os
 import json
 from collections import Counter
@@ -109,8 +110,50 @@ def daily_run_pressed_time_text(record):
 
 class RunButtonView(discord.ui.View):
     def __init__(self):
-        super().__init__(timeout=RUN_BUTTON_TIMEOUT_SECONDS)
+        # View.timeout is refreshed after every interaction, so it cannot be
+        # used for a fixed 30-minute window from the time of posting.
+        super().__init__(timeout=None)
         self.message = None
+        self._expires_at = (
+            asyncio.get_running_loop().time() + RUN_BUTTON_TIMEOUT_SECONDS
+        )
+        self._expiration_task = None
+
+    def start_expiration_timer(self):
+        self._expiration_task = asyncio.create_task(self._expire_at_fixed_time())
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if asyncio.get_running_loop().time() < self._expires_at:
+            return True
+
+        await self._disable_buttons()
+        if not interaction.response.is_done():
+            await interaction.response.send_message(
+                "このボタンの受付時間（投稿から30分）は終了しました。",
+                ephemeral=True,
+            )
+        return False
+
+    async def _expire_at_fixed_time(self):
+        remaining_seconds = self._expires_at - asyncio.get_running_loop().time()
+        if remaining_seconds > 0:
+            await asyncio.sleep(remaining_seconds)
+        await self._disable_buttons()
+
+    async def _disable_buttons(self):
+        if all(item.disabled for item in self.children):
+            return
+
+        for item in self.children:
+            item.disabled = True
+
+        self.stop()
+
+        if self.message is not None:
+            try:
+                await self.message.edit(view=self)
+            except discord.HTTPException:
+                pass
 
     @discord.ui.button(label="走る", style=discord.ButtonStyle.primary)
     async def run_button(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -143,14 +186,7 @@ class RunButtonView(discord.ui.View):
         )
 
     async def on_timeout(self):
-        for item in self.children:
-            item.disabled = True
-
-        if self.message is not None:
-            try:
-                await self.message.edit(view=self)
-            except discord.HTTPException:
-                pass
+        await self._disable_buttons()
 
 
 @bot.event
@@ -204,6 +240,7 @@ async def send_morning_message():
         "朝4時よ！　これから走りに出るんでしょ？\n30分以内に「走る」を押した人を記録するわ！",
         view=view,
     )
+    view.start_expiration_timer()
 
 
 @tasks.loop(time=DAILY_RANKING_TIME)
